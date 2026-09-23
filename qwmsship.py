@@ -1,6 +1,75 @@
+import csv
 from pathlib import Path
-from PyQt5.QtWidgets import QAction
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QAction, QComboBox, QDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QVBoxLayout
 from qgis.core import QgsProject, QgsLayerTreeLayer, QgsLayerTreeGroup
+
+
+class LinkConfigDialog(QDialog):
+
+    def __init__(self, plugin, parent=None):
+        super().__init__(parent)
+        self.plugin = plugin
+        self.setWindowTitle('SwitchLayers configuration')
+        self.resize(620, 260)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel('Layers available in the Inputs tree'))
+
+        self.table = QTableWidget(10, 3)
+        self.table.setHorizontalHeaderLabels(['Slot', 'Short name', 'Layer'])
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+
+        layer_names = self.plugin.get_input_layer_names()
+
+        for slot in range(10):
+            config = self.plugin.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+            self.table.setItem(slot, 0, QTableWidgetItem(str(slot)))
+
+            short_name = QLineEdit(config.get('shortname', ''))
+            self.table.setCellWidget(slot, 1, short_name)
+
+            layer_combo = QComboBox()
+            layer_combo.addItem('')
+            for layer_name in layer_names:
+                layer_combo.addItem(layer_name)
+
+            selected_layer = config.get('layer', '')
+            if selected_layer and selected_layer in layer_names:
+                layer_combo.setCurrentText(selected_layer)
+            self.table.setCellWidget(slot, 2, layer_combo)
+
+        layout.addWidget(self.table)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.save_config)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def save_config(self):
+        rows = []
+        for slot in range(self.table.rowCount()):
+            short_name_widget = self.table.cellWidget(slot, 1)
+            layer_widget = self.table.cellWidget(slot, 2)
+
+            short_name = short_name_widget.text().strip() if short_name_widget else ''
+            layer_name = layer_widget.currentText().strip() if layer_widget else ''
+            rows.append((slot, short_name, layer_name))
+
+        config_path = self.plugin.get_config_path()
+        with config_path.open('w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow(['slot', 'shortname', 'layer'])
+            for slot, short_name, layer_name in rows:
+                writer.writerow([slot, short_name, layer_name])
+
+        self.plugin.link_config = self.plugin.load_link_config()
+        self.plugin.refresh_slot_buttons()
+        self.accept()
+
 
 class QWmsShipPlugin:
 
@@ -9,275 +78,119 @@ class QWmsShipPlugin:
         # Gives the plugin access to the QGIS interface (iface)
         self.iface = iface
         self.actions = []
+        self.button_slots = {}
+        self.link_config = self.load_link_config()
+
+    def get_config_path(self):
+        csv_path = Path(__file__).with_name('user_links.csv')
+        txt_path = Path(__file__).with_name('user_links.txt')
+        if csv_path.exists():
+            return csv_path
+        if txt_path.exists():
+            return txt_path
+        return csv_path
+
+    def load_link_config(self):
+        config_path = self.get_config_path()
+        slots = {}
+
+        if not config_path.exists():
+            return slots
+
+        with config_path.open('r', newline='', encoding='utf-8-sig') as file:
+            reader = csv.reader(file)
+            for row in reader:
+                if not row or len(row) < 3:
+                    continue
+
+                slot_label = row[0].strip()
+                if slot_label.lower() == 'slot':
+                    continue
+
+                try:
+                    slot = int(slot_label)
+                except ValueError:
+                    continue
+
+                if 0 <= slot < 10:
+                    shortname = row[1].strip().strip("'\"")
+                    layer_name = row[2].strip().strip("'\"")
+                    slots[slot] = {'shortname': shortname, 'layer': layer_name}
+
+        for slot in range(10):
+            slots.setdefault(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+
+        return slots
+
+    def get_input_layer_names(self):
+        inputs_tree = getLayersTreeGroups(name='inputs')
+        if not inputs_tree:
+            return []
+
+        inputs_root = inputs_tree[0]
+        layers = getLayersTreeLayers(tree=inputs_root)
+        if isinstance(layers, str):
+            return []
+
+        return [layer.name() for layer in layers]
 
     # Called whe the plugin is loaded by Qgis
     def initGui(self):
 
         # Found logofiles path
         resources = Path(Path(__file__).parent, 'resources')
-        icon_load = str(Path(resources, 'logo.png'))
 
         # Récupère l'arbre racine des couches du projet
         self.root_group = QgsProject.instance().layerTreeRoot()
 
-        # Add buttons
-        self.button_SwAlti3D_Mono = QAction('A3D 1', self.iface.mainWindow())
-        self.button_SwAlti3D_Multi = QAction('A3D *', self.iface.mainWindow())
-        self.button_SwSurf3D_Multi = QAction('S3D *', self.iface.mainWindow())
-        self.button_SwSurf3D_Mono = QAction('S3D 1', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2023 = QAction('2023', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2020 = QAction('2020', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2017 = QAction('2017', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2014 = QAction('2014', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2012 = QAction('2012', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2009 = QAction('2009', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2005 = QAction('2005', self.iface.mainWindow())
-        self.button_SWISSIMAGE_2000 = QAction('2000', self.iface.mainWindow())
+        for slot in range(10):
+            config = self.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+            label = config.get('shortname') or f'Slot {slot}'
+            button = QAction(label, self.iface.mainWindow())
+            button.triggered.connect(lambda checked=False, slot_index=slot: self.run_button(slot_index))
+            self.iface.addToolBarIcon(button)
+            self.actions.append(button)
+            self.button_slots[slot] = button
 
-        self.button_SWISSIMAGE_1995 = QAction('1995', self.iface.mainWindow())
-        self.button_SWISSIMAGE_1985 = QAction('1985', self.iface.mainWindow())
-        self.button_SWISSIMAGE_1977 = QAction('1977', self.iface.mainWindow())
-        self.button_SWISSIMAGE_1968 = QAction('1968', self.iface.mainWindow())
-        self.button_SWISSIMAGE_1960 = QAction('1960', self.iface.mainWindow())
-        self.button_SWISSIMAGE_1946 = QAction('1946', self.iface.mainWindow())
+        icon_path = str(Path(__file__).resolve().parent / 'resources' / 'config_logo.png')
+        self.config_button = QAction(QIcon(icon_path), '', self.iface.mainWindow())
+        self.config_button.triggered.connect(self.open_config_dialog)
+        self.iface.addToolBarIcon(self.config_button)
+        self.actions.append(self.config_button)
 
-        self.button_TopoMapCol      = QAction('TPCOL', self.iface.mainWindow())
-        self.button_TopoMapGr       = QAction('TPGR', self.iface.mainWindow())
+    def refresh_slot_buttons(self):
+        for slot in range(10):
+            button = self.button_slots.get(slot)
+            if button is None:
+                continue
+            config = self.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+            button.setText(config.get('shortname') or f'Slot {slot}')
 
-        # Connect them to their function
-        self.button_SwAlti3D_Mono.triggered.connect(self.run_button_SwAlti3D_Mono)
-        self.button_SwAlti3D_Multi.triggered.connect(self.run_button_SwAlti3D_Multi)
-        self.button_SwSurf3D_Multi.triggered.connect(self.run_button_SwSurf3D_Multi)
-        self.button_SwSurf3D_Mono.triggered.connect(self.run_button_SwSurf3D_Mono)
-        self.button_SWISSIMAGE_2023.triggered.connect(self.run_button_SWISSIMAGE_2023)
-        self.button_SWISSIMAGE_2020.triggered.connect(self.run_button_SWISSIMAGE_2020)
-        self.button_SWISSIMAGE_2017.triggered.connect(self.run_button_SWISSIMAGE_2017)
-        self.button_SWISSIMAGE_2014.triggered.connect(self.run_button_SWISSIMAGE_2014)
-        self.button_SWISSIMAGE_2012.triggered.connect(self.run_button_SWISSIMAGE_2012)
-        self.button_SWISSIMAGE_2009.triggered.connect(self.run_button_SWISSIMAGE_2009)
-        self.button_SWISSIMAGE_2005.triggered.connect(self.run_button_SWISSIMAGE_2005)
-        self.button_SWISSIMAGE_2000.triggered.connect(self.run_button_SWISSIMAGE_2000)
-        self.button_SWISSIMAGE_1995.triggered.connect(self.run_button_SWISSIMAGE_1995)
-        self.button_SWISSIMAGE_1985.triggered.connect(self.run_button_SWISSIMAGE_1985)
-        self.button_SWISSIMAGE_1977.triggered.connect(self.run_button_SWISSIMAGE_1977)
-        self.button_SWISSIMAGE_1968.triggered.connect(self.run_button_SWISSIMAGE_1968)
-        self.button_SWISSIMAGE_1960.triggered.connect(self.run_button_SWISSIMAGE_1960)
-        self.button_SWISSIMAGE_1946.triggered.connect(self.run_button_SWISSIMAGE_1946)
+    def open_config_dialog(self):
+        dialog = LinkConfigDialog(self, self.iface.mainWindow())
+        dialog.exec_()
 
-        self.button_TopoMapCol.triggered.connect(self.run_button_TopoMapCol)
-        self.button_TopoMapGr.triggered.connect(self.run_button_TopoMapGr)
-
-        # Add them to the interface
-        self.iface.addToolBarIcon(self.button_SwAlti3D_Mono)
-        self.iface.addToolBarIcon(self.button_SwAlti3D_Multi)
-        self.iface.addToolBarIcon(self.button_SwSurf3D_Multi)
-        self.iface.addToolBarIcon(self.button_SwSurf3D_Mono)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2023)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2020)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2017)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2014)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2012)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2009)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2005)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_2000)
-
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_1995)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_1985)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_1977)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_1968)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_1960)
-        self.iface.addToolBarIcon(self.button_SWISSIMAGE_1946)
-
-        self.iface.addToolBarIcon(self.button_TopoMapCol)
-        self.iface.addToolBarIcon(self.button_TopoMapGr)        
-
-        # Put them in a list
-        self.actions = [self.button_SwAlti3D_Mono, self.button_SwAlti3D_Multi, self.button_SwSurf3D_Multi, self.button_SwSurf3D_Mono, self.button_SWISSIMAGE_2023, self.button_SWISSIMAGE_2020, self.button_SWISSIMAGE_2017, self.button_SWISSIMAGE_2014, self.button_SWISSIMAGE_2012, self.button_SWISSIMAGE_2009, self.button_SWISSIMAGE_2005, self.button_SWISSIMAGE_2000, self.button_SWISSIMAGE_1995,self.button_SWISSIMAGE_1985,self.button_SWISSIMAGE_1977,self.button_SWISSIMAGE_1968,self.button_SWISSIMAGE_1960,self.button_SWISSIMAGE_1946, self.button_TopoMapCol, self.button_TopoMapGr]
-
-    # Called when the plugin is unloaded      
+    # Called when the plugin is unloaded
     def unload(self):
         for action in self.actions:
             self.iface.removeToolBarIcon(action)
 
-    def run_button_SwAlti3D_Mono(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SwAlti3D_Mono')[0]
-        target.setItemVisibilityChecked(True)
+    def run_button(self, slot):
+        config = self.link_config.get(slot, {'shortname': '', 'layer': ''})
+        layer_name = config.get('layer', '').strip()
+        if not layer_name:
+            return
 
-    def run_button_SwAlti3D_Multi(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
+        inputs_tree = getLayersTreeGroups(name='inputs')[0]
+        for group in getLayersTreeGroups(tree=inputs_tree):
             group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
+        for layer in getLayersTreeLayers(tree=inputs_tree):
             layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SwAlti3D_Multi')[0]
-        target.setItemVisibilityChecked(True)
 
-    def run_button_SwSurf3D_Multi(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SwSurf3D_Multi')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SwSurf3D_Mono(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SwSurf3D_Mono')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_2023(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2023')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_2020(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2020')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_2017(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2017')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_SWISSIMAGE_2014(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2014')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_SWISSIMAGE_2012(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2012')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_2009(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2009')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_2005(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2005')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_2000(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 2000')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_SWISSIMAGE_1995(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 1995')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_1985(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 1985')[0]
-        target.setItemVisibilityChecked(True)
-     
-    def run_button_SWISSIMAGE_1977(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 1977')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_SWISSIMAGE_1968(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 1968')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_SWISSIMAGE_1960(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 1960')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_SWISSIMAGE_1946(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'SWISSIMAGE 1946')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_TopoMapCol(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'Landeskarten (farbig)')[0]
-        target.setItemVisibilityChecked(True)
-
-    def run_button_TopoMapGr(self):
-        inputs_tree = getLayersTreeGroups(name = 'inputs')[0]
-        for group in getLayersTreeGroups(tree = inputs_tree):
-            group.setItemVisibilityChecked(True)
-        for layer in getLayersTreeLayers(tree = inputs_tree):
-            layer.setItemVisibilityChecked(False)
-        target = getLayersTreeLayers(name = 'Landeskarten (grau)')[0]
-        target.setItemVisibilityChecked(True)
+        target = getLayersTreeLayers(name=layer_name)
+        if isinstance(target, str) or len(target) == 0:
+            return
+        target[0].setItemVisibilityChecked(True)
 
 def getLayersTreeGroups(tree='', name=''):
     """
