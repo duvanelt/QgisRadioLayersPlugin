@@ -1,7 +1,8 @@
 import csv
 from pathlib import Path
-from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QAction, QComboBox, QDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit, QTableWidget, QTableWidgetItem, QVBoxLayout
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QIcon, QKeySequence
+from PyQt5.QtWidgets import QAction, QCompleter, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 from qgis.core import QgsProject, QgsLayerTreeLayer, QgsLayerTreeGroup
 
 
@@ -12,35 +13,50 @@ class LinkConfigDialog(QDialog):
         self.plugin = plugin
         self.setWindowTitle('SwitchLayers configuration')
         self.resize(620, 260)
+        self.capture_slot = None
+        self.shortcut_values = {}
+        self.shortcut_widgets = {}
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel('Layers available in the Inputs tree'))
 
-        self.table = QTableWidget(10, 3)
-        self.table.setHorizontalHeaderLabels(['Slot', 'Short name', 'Layer'])
+        self.table = QTableWidget(10, 4)
+        self.table.setHorizontalHeaderLabels(['Slot', 'Short name', 'Layer', 'Shortcut'])
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
 
         layer_names = self.plugin.get_input_layer_names()
 
         for slot in range(10):
-            config = self.plugin.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+            config = self.plugin.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': '', 'shortcut': ''})
             self.table.setItem(slot, 0, QTableWidgetItem(str(slot)))
 
             short_name = QLineEdit(config.get('shortname', ''))
             self.table.setCellWidget(slot, 1, short_name)
 
-            layer_combo = QComboBox()
-            layer_combo.addItem('')
-            for layer_name in layer_names:
-                layer_combo.addItem(layer_name)
+            layer_text = QLineEdit(config.get('layer', ''))
+            layer_text.setPlaceholderText('Type first letters...')
+            layer_completer = QCompleter(layer_names)
+            layer_completer.setCaseSensitivity(Qt.CaseInsensitive)
+            layer_completer.setFilterMode(Qt.MatchContains)
+            layer_text.setCompleter(layer_completer)
+            self.table.setCellWidget(slot, 2, layer_text)
 
-            selected_layer = config.get('layer', '')
-            if selected_layer and selected_layer in layer_names:
-                layer_combo.setCurrentText(selected_layer)
-            self.table.setCellWidget(slot, 2, layer_combo)
+            shortcut_value = config.get('shortcut', '').strip()
+            self.shortcut_values[slot] = shortcut_value
+            shortcut_widget = QWidget()
+            shortcut_layout = QHBoxLayout(shortcut_widget)
+            shortcut_layout.setContentsMargins(0, 0, 0, 0)
+            shortcut_label = QLabel(shortcut_value if shortcut_value else 'None')
+            shortcut_button = QPushButton('Set shortcut')
+            shortcut_button.clicked.connect(lambda checked=False, slot_index=slot: self.start_shortcut_capture(slot_index))
+            shortcut_layout.addWidget(shortcut_label)
+            shortcut_layout.addWidget(shortcut_button)
+            self.shortcut_widgets[slot] = {'label': shortcut_label, 'button': shortcut_button}
+            self.table.setCellWidget(slot, 3, shortcut_widget)
 
         layout.addWidget(self.table)
 
@@ -49,6 +65,48 @@ class LinkConfigDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def start_shortcut_capture(self, slot):
+        self.capture_slot = slot
+        button = self.shortcut_widgets.get(slot, {}).get('button')
+        if button is not None:
+            button.setText('Press keys...')
+        self.grabKeyboard()
+
+    def cancel_shortcut_capture(self):
+        if self.capture_slot is None:
+            return
+        button = self.shortcut_widgets.get(self.capture_slot, {}).get('button')
+        if button is not None:
+            button.setText('Set shortcut')
+        self.releaseKeyboard()
+        self.capture_slot = None
+
+    def set_shortcut_for_slot(self, slot, shortcut_text):
+        self.shortcut_values[slot] = shortcut_text
+        widget = self.shortcut_widgets.get(slot)
+        if widget is not None:
+            widget['label'].setText(shortcut_text if shortcut_text else 'None')
+            widget['button'].setText('Set shortcut')
+        self.releaseKeyboard()
+        self.capture_slot = None
+
+    def keyPressEvent(self, event):
+        if self.capture_slot is not None:
+            if event.key() in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter):
+                self.cancel_shortcut_capture()
+                event.accept()
+                return
+            if event.key() in (Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta):
+                event.ignore()
+                return
+            shortcut = QKeySequence(event.modifiers() | event.key())
+            shortcut_text = shortcut.toString()
+            if shortcut_text:
+                self.set_shortcut_for_slot(self.capture_slot, shortcut_text)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def save_config(self):
         rows = []
         for slot in range(self.table.rowCount()):
@@ -56,15 +114,16 @@ class LinkConfigDialog(QDialog):
             layer_widget = self.table.cellWidget(slot, 2)
 
             short_name = short_name_widget.text().strip() if short_name_widget else ''
-            layer_name = layer_widget.currentText().strip() if layer_widget else ''
-            rows.append((slot, short_name, layer_name))
+            layer_name = layer_widget.text().strip() if layer_widget else ''
+            shortcut = self.shortcut_values.get(slot, '').strip()
+            rows.append((slot, short_name, layer_name, shortcut))
 
         config_path = self.plugin.get_config_path()
         with config_path.open('w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            writer.writerow(['slot', 'shortname', 'layer'])
-            for slot, short_name, layer_name in rows:
-                writer.writerow([slot, short_name, layer_name])
+            writer.writerow(['slot', 'shortname', 'layer', 'shortcut'])
+            for slot, short_name, layer_name, shortcut in rows:
+                writer.writerow([slot, short_name, layer_name, shortcut])
 
         self.plugin.link_config = self.plugin.load_link_config()
         self.plugin.refresh_slot_buttons()
@@ -115,16 +174,17 @@ class QWmsShipPlugin:
                 if 0 <= slot < 10:
                     shortname = row[1].strip().strip("'\"")
                     layer_name = row[2].strip().strip("'\"")
-                    slots[slot] = {'shortname': shortname, 'layer': layer_name}
+                    shortcut = row[3].strip().strip("'\"") if len(row) > 3 else ''
+                    slots[slot] = {'shortname': shortname, 'layer': layer_name, 'shortcut': shortcut}
 
         for slot in range(10):
-            slots.setdefault(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+            slots.setdefault(slot, {'shortname': f'Slot {slot}', 'layer': '', 'shortcut': ''})
 
         return slots
 
     def get_input_layer_names(self):
         inputs_tree = getLayersTreeGroups(name='inputs')
-        if not inputs_tree:
+        if isinstance(inputs_tree, str) or not inputs_tree:
             return []
 
         inputs_root = inputs_tree[0]
@@ -133,6 +193,11 @@ class QWmsShipPlugin:
             return []
 
         return [layer.name() for layer in layers]
+
+    def slot_is_used(self, slot):
+        config = self.link_config.get(slot, {})
+        layer_name = str(config.get('layer', '')).strip()
+        return bool(layer_name)
 
     # Called whe the plugin is loaded by Qgis
     def initGui(self):
@@ -144,10 +209,14 @@ class QWmsShipPlugin:
         self.root_group = QgsProject.instance().layerTreeRoot()
 
         for slot in range(10):
-            config = self.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+            config = self.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': '', 'shortcut': ''})
             label = config.get('shortname') or f'Slot {slot}'
             button = QAction(label, self.iface.mainWindow())
             button.triggered.connect(lambda checked=False, slot_index=slot: self.run_button(slot_index))
+            shortcut = config.get('shortcut', '').strip()
+            if shortcut:
+                button.setShortcut(QKeySequence(shortcut))
+            button.setVisible(self.slot_is_used(slot))
             self.iface.addToolBarIcon(button)
             self.actions.append(button)
             self.button_slots[slot] = button
@@ -163,8 +232,14 @@ class QWmsShipPlugin:
             button = self.button_slots.get(slot)
             if button is None:
                 continue
-            config = self.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': ''})
+            config = self.link_config.get(slot, {'shortname': f'Slot {slot}', 'layer': '', 'shortcut': ''})
             button.setText(config.get('shortname') or f'Slot {slot}')
+            shortcut = config.get('shortcut', '').strip()
+            if shortcut:
+                button.setShortcut(QKeySequence(shortcut))
+            else:
+                button.setShortcut('')
+            button.setVisible(self.slot_is_used(slot))
 
     def open_config_dialog(self):
         dialog = LinkConfigDialog(self, self.iface.mainWindow())
@@ -187,7 +262,7 @@ class QWmsShipPlugin:
         for layer in getLayersTreeLayers(tree=inputs_tree):
             layer.setItemVisibilityChecked(False)
 
-        target = getLayersTreeLayers(name=layer_name)
+        target = getLayersTreeLayers(tree=inputs_tree, name=layer_name)
         if isinstance(target, str) or len(target) == 0:
             return
         target[0].setItemVisibilityChecked(True)
