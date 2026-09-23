@@ -1,0 +1,9 @@
+[general]
+name = show_swisstopo_layers V2
+description = A plugin to easily display & hide wms layers in qgis.
+about = none
+version=0.1
+qgisMinimumVersion=3.0
+author=Thibaut Duvanel
+email=thibaut.duvanel@unil.ch
+repository=none
