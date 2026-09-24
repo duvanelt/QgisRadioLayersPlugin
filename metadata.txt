@@ -1,6 +1,6 @@
 [general]
-name = SwitchLayer
-description = A plugin to easily display & hide layers in qgis.
+name = RadioLayers
+description = A plugin to easily display and hide layers in Qgis3.
 about = none
 version=0.1
 qgisMinimumVersion=3.0

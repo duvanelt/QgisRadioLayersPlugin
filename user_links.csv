@@ -1,11 +1,12 @@
+inputs_group,RadioChannels
 slot,shortname,layer,shortcut
-0,2026,SWISSIMAGE 2026,2
-1,2023,SWISSIMAGE 2023,3
-2,A3D*,SwAlti3D_Multi,§
-3,A3D1,SwAlti3D_Mono,1
-4,Geol,GeoCover - Vektordaten,Shift+G
-5,2017,SWISSIMAGE 2017,4
-6,Slot 6,,
-7,Slot 7,,
-8,Slot 8,,
+0,A3D*,SwAlti3D_Multi,§
+1,A3D1,SwAlti3D_Mono,1
+2,2023,SWISSIMAGE 2023,2
+3,2020,SWISSIMAGE 2020,3
+4,2017,SWISSIMAGE 2017,4
+5,2009,SWISSIMAGE 2009,5
+6,Geol,GeoCover - Vektordaten,6
+7,Topo,Landeskarten (farbig),7
+8,,,0
 9,Slot 9,,

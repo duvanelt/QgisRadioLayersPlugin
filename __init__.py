@@ -1,4 +1,4 @@
-from .qwmsship import QWmsShipPlugin
+from .radioLayers import RadioLayersPlugin
 
 def classFactory(iface):
-    return QWmsShipPlugin(iface)
+    return RadioLayersPlugin(iface)
