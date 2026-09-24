@@ -6,4 +6,4 @@ version=1.0
 qgisMinimumVersion=3.0
 author=Thibaut Duvanel
 email=thibaut.duvanel@unil.ch
-repository=none
+repository=https://github.com/duvanelt/QgisRadioLayersPlugin
