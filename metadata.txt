@@ -2,7 +2,7 @@
 name = RadioLayers
 description = A plugin to easily display and hide layers in Qgis3.
 about = none
-version=0.1
+version=1.0
 qgisMinimumVersion=3.0
 author=Thibaut Duvanel
 email=thibaut.duvanel@unil.ch
