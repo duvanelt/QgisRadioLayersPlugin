@@ -5,6 +5,9 @@ This plugin lets you display a selection of layers in a QGIS project as radio ch
 
 # How to Use
 
+## Requirements
+- This plugins works for Qgis 3, not for Qgis 4.
+
 ## 0) Installation
 - Download the plugin as a ZIP archive from the repository. (Code > Download ZIP)
 - In QGIS, go to **Plugins > Manage and Install Plugins > Install from ZIP**.
