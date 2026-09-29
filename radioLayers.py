@@ -12,7 +12,7 @@ import csv # Pandas is not available in Qgis python env
 # GUI management
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtWidgets import QAction, QCompleter, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QAction, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 # PyQgis
 from qgis.core import QgsProject, QgsLayerTreeLayer, QgsLayerTreeGroup
@@ -113,6 +113,19 @@ class LinkConfigDialog(QDialog):
         # Finally add the table to the dashboard window
         layout.addWidget(self.table)
 
+        # Create the buttons to handle save / load config states
+        config_file_buttons = QHBoxLayout()
+        save_config_button = QPushButton('Save config')
+        save_config_button.clicked.connect(self.save_config_as)
+        load_config_button = QPushButton('Load config')
+        load_config_button.clicked.connect(self.load_config_file)
+        clear_slots_button = QPushButton('Clear slots')
+        clear_slots_button.clicked.connect(self.clear_slots)
+        config_file_buttons.addWidget(save_config_button)
+        config_file_buttons.addWidget(load_config_button)
+        config_file_buttons.addWidget(clear_slots_button)
+        layout.addLayout(config_file_buttons)
+
         # Add two buttons below the config table : accept or cancel
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.save_config)
@@ -154,6 +167,28 @@ class LinkConfigDialog(QDialog):
             widget['button'].setText('Set shortcut')
         self.releaseKeyboard()
         self.capture_slot = None
+
+    def clear_slots(self):
+        """
+        Reset the slots of the current instance
+        While it's not save it will not write into any config file
+        """
+        if self.capture_slot is not None:
+            self.cancel_shortcut_capture()
+
+        for slot in range(self.table.rowCount()):
+            short_name = self.table.cellWidget(slot, 1)
+            layer_name = self.table.cellWidget(slot, 2)
+            if short_name is not None:
+                short_name.clear()
+            if layer_name is not None:
+                layer_name.clear()
+
+            self.shortcut_values[slot] = ''
+            shortcut_widgets = self.shortcut_widgets.get(slot, {})
+            label = shortcut_widgets.get('label')
+            if label is not None:
+                label.setText('None')
 
     def keyPressEvent(self, event):
         if self.capture_slot is not None:
@@ -210,6 +245,78 @@ class LinkConfigDialog(QDialog):
         self.plugin.link_config = self.plugin.load_link_config()
         self.plugin.refresh_slot_buttons()
         self.accept()
+
+    def save_config_as(self):
+        """
+        Save a configuration file as .csv
+        """
+
+        # Open file browser navigation system
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            'Save RadioLayers configuration',
+            str(self.plugin.config_path),
+            'CSV files (*.csv);;All files (*)'
+        )
+
+        # If user don't choose a location
+        if not path:
+            return None
+
+        # If user didn't manually add the extension
+        if not path.lower().endswith('.csv'):
+            path += '.csv'
+
+        # Keep the config in memory for current usage / Instance
+        self.plugin.config_path = Path(path)
+
+        # And save the file with the classical method 
+        # Now that the self.plugin.config_path has been changed
+        self.save_config()
+
+    def load_config_file(self):
+        """
+        Load a configuration from csv file
+        """
+
+        # Open file browser navigation system
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            'Load RadioLayers configuration',
+            str(self.plugin.config_path.parent),
+            'CSV files (*.csv);;All files (*)'
+        )
+        if not path:
+            return
+
+        self.plugin.config_path = Path(path)
+        self.plugin.link_config = self.plugin.load_link_config()
+        self.inputs_group_widget.setText(self.plugin.inputs_group)
+
+        # For each slot
+        for slot in range(self.table.rowCount()):
+
+            # Get its data / metadata
+            config = self.plugin.link_config.get(slot, {})
+            short_name = self.table.cellWidget(slot, 1)
+            layer_name = self.table.cellWidget(slot, 2)
+
+            # Default values
+            if short_name is not None:
+                short_name.setText(config.get('shortname', f'Slot {slot}'))
+            if layer_name is not None:
+                layer_name.setText(config.get('layer', ''))
+
+            # Assign shortcuts
+            shortcut = config.get('shortcut', '')
+            self.shortcut_values[slot] = shortcut
+            shortcut_widgets = self.shortcut_widgets.get(slot, {})
+            label = shortcut_widgets.get('label')
+            if label is not None:
+                label.setText(shortcut if shortcut else 'None')
+
+        # Update the buttons after config update
+        self.plugin.refresh_slot_buttons()
 
 class RadioLayersPlugin:
     """

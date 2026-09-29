@@ -29,4 +29,11 @@ This plugin lets you display a selection of layers in a QGIS project as radio ch
 - Save the configuration.
 - You are ready to go!
 
+## 3) Save multiple configuration states
+- Open the configuration dashboard and click **Save config** to save the current setup as a named CSV file. Choose a different filename for each setup you want to keep.
+- Each file stores the input group and the ten slots' short names, layer names, and keyboard shortcuts.
+- To switch setups, click **Load config** and choose a previously saved CSV. The dashboard and toolbar buttons update immediately.
+- The dashboard's **Save** button writes changes to the currently selected configuration file. Before any file is loaded or saved under a new name, this is the plugin's default `user_links.csv` configuration.
+- The selected file is not linked to a QGIS project. Load the desired CSV when switching projects; after the plugin is reloaded, it starts from `user_links.csv` again.
+
 ![Final Config State Example](doc/finalConfigExample.png "Final Config State Example")
