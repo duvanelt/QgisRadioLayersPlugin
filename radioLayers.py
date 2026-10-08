@@ -10,12 +10,20 @@ from pathlib import Path
 import csv # Pandas is not available in Qgis python env
 
 # GUI management
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon, QKeySequence
-from PyQt5.QtWidgets import QAction, QCompleter, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
+from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtGui import QIcon, QKeySequence
+try:
+    from qgis.PyQt.QtGui import QAction
+except ImportError:
+    from qgis.PyQt.QtWidgets import QAction
+from qgis.PyQt.QtWidgets import QCompleter, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 # PyQgis
 from qgis.core import QgsProject, QgsLayerTreeLayer, QgsLayerTreeGroup
+
+def qt_enum(owner, scope, name):
+    """Return a Qt enum member across scoped and unscoped Qt bindings."""
+    return getattr(getattr(owner, scope, owner), name)
 
 class LinkConfigDialog(QDialog):
     """
@@ -58,10 +66,10 @@ class LinkConfigDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
 
         # Rules each column behavior in relation with its content type
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, qt_enum(QHeaderView, 'ResizeMode', 'ResizeToContents'))
+        self.table.horizontalHeader().setSectionResizeMode(1, qt_enum(QHeaderView, 'ResizeMode', 'Stretch'))
+        self.table.horizontalHeader().setSectionResizeMode(2, qt_enum(QHeaderView, 'ResizeMode', 'Stretch'))
+        self.table.horizontalHeader().setSectionResizeMode(3, qt_enum(QHeaderView, 'ResizeMode', 'Stretch'))
 
         # Scan the available layer within the Input Tree
         layer_names = self.plugin.get_input_layer_names()
@@ -85,8 +93,8 @@ class LinkConfigDialog(QDialog):
 
             # With auto completion
             layer_completer = QCompleter(layer_names)
-            layer_completer.setCaseSensitivity(Qt.CaseInsensitive)
-            layer_completer.setFilterMode(Qt.MatchContains)
+            layer_completer.setCaseSensitivity(qt_enum(Qt, 'CaseSensitivity', 'CaseInsensitive'))
+            layer_completer.setFilterMode(qt_enum(Qt, 'MatchFlag', 'MatchContains'))
             layer_text.setCompleter(layer_completer)
 
             # Place it in the third dashboard column
@@ -127,7 +135,10 @@ class LinkConfigDialog(QDialog):
         layout.addLayout(config_file_buttons)
 
         # Add two buttons below the config table : accept or cancel
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(
+            qt_enum(QDialogButtonBox, 'StandardButton', 'Save') |
+            qt_enum(QDialogButtonBox, 'StandardButton', 'Cancel')
+        )
         buttons.accepted.connect(self.save_config)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -192,14 +203,23 @@ class LinkConfigDialog(QDialog):
 
     def keyPressEvent(self, event):
         if self.capture_slot is not None:
-            if event.key() in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter):
+            if event.key() in (
+                qt_enum(Qt, 'Key', 'Key_Escape'),
+                qt_enum(Qt, 'Key', 'Key_Return'),
+                qt_enum(Qt, 'Key', 'Key_Enter')
+            ):
                 self.cancel_shortcut_capture()
                 event.accept()
                 return
-            if event.key() in (Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta):
+            if event.key() in (
+                qt_enum(Qt, 'Key', 'Key_Shift'),
+                qt_enum(Qt, 'Key', 'Key_Control'),
+                qt_enum(Qt, 'Key', 'Key_Alt'),
+                qt_enum(Qt, 'Key', 'Key_Meta')
+            ):
                 event.ignore()
                 return
-            shortcut = QKeySequence(event.modifiers() | event.key())
+            shortcut = QKeySequence(int(event.modifiers()) | event.key())
             shortcut_text = shortcut.toString()
             if shortcut_text:
                 self.set_shortcut_for_slot(self.capture_slot, shortcut_text)
@@ -476,7 +496,8 @@ class RadioLayersPlugin:
 
     def open_config_dialog(self):
         dialog = LinkConfigDialog(self, self.iface.mainWindow())
-        dialog.exec_()
+        execute = getattr(dialog, 'exec', None) or dialog.exec_
+        execute()
 
     # Called when the plugin is unloaded
     def unload(self):
