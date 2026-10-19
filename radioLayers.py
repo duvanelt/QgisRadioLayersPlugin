@@ -121,7 +121,7 @@ class LinkConfigDialog(QDialog):
         # Finally add the table to the dashboard window
         layout.addWidget(self.table)
 
-        # Create the buttons to handle save / load config states
+        # Save or load configuration files
         config_file_buttons = QHBoxLayout()
         save_config_button = QPushButton('Save config')
         save_config_button.clicked.connect(self.save_config_as)
@@ -219,7 +219,9 @@ class LinkConfigDialog(QDialog):
             ):
                 event.ignore()
                 return
-            shortcut = QKeySequence(int(event.modifiers()) | event.key())
+            modifiers = event.modifiers()
+            modifier_value = getattr(modifiers, 'value', modifiers)
+            shortcut = QKeySequence(int(modifier_value) | event.key())
             shortcut_text = shortcut.toString()
             if shortcut_text:
                 self.set_shortcut_for_slot(self.capture_slot, shortcut_text)
@@ -264,42 +266,32 @@ class LinkConfigDialog(QDialog):
         # Refresh buttons of the plugin toolbar
         self.plugin.link_config = self.plugin.load_link_config()
         self.plugin.refresh_slot_buttons()
+
+        # Persist the selected config path for the next QGIS session
+        self.plugin.remember_config_path()
         self.accept()
 
     def save_config_as(self):
         """
         Save a configuration file as .csv
         """
-
-        # Open file browser navigation system
         path, _ = QFileDialog.getSaveFileName(
             self,
             'Save RadioLayers configuration',
             str(self.plugin.config_path),
             'CSV files (*.csv);;All files (*)'
         )
-
-        # If user don't choose a location
         if not path:
-            return None
-
-        # If user didn't manually add the extension
+            return
         if not path.lower().endswith('.csv'):
             path += '.csv'
-
-        # Keep the config in memory for current usage / Instance
         self.plugin.config_path = Path(path)
-
-        # And save the file with the classical method 
-        # Now that the self.plugin.config_path has been changed
         self.save_config()
 
     def load_config_file(self):
         """
         Load a configuration from csv file
         """
-
-        # Open file browser navigation system
         path, _ = QFileDialog.getOpenFileName(
             self,
             'Load RadioLayers configuration',
@@ -310,32 +302,23 @@ class LinkConfigDialog(QDialog):
             return
 
         self.plugin.config_path = Path(path)
+        self.plugin.remember_config_path()
         self.plugin.link_config = self.plugin.load_link_config()
         self.inputs_group_widget.setText(self.plugin.inputs_group)
-
-        # For each slot
         for slot in range(self.table.rowCount()):
-
-            # Get its data / metadata
             config = self.plugin.link_config.get(slot, {})
             short_name = self.table.cellWidget(slot, 1)
             layer_name = self.table.cellWidget(slot, 2)
-
-            # Default values
             if short_name is not None:
                 short_name.setText(config.get('shortname', f'Slot {slot}'))
             if layer_name is not None:
                 layer_name.setText(config.get('layer', ''))
-
-            # Assign shortcuts
             shortcut = config.get('shortcut', '')
             self.shortcut_values[slot] = shortcut
             shortcut_widgets = self.shortcut_widgets.get(slot, {})
             label = shortcut_widgets.get('label')
             if label is not None:
                 label.setText(shortcut if shortcut else 'None')
-
-        # Update the buttons after config update
         self.plugin.refresh_slot_buttons()
 
 class RadioLayersPlugin:
@@ -348,12 +331,28 @@ class RadioLayersPlugin:
         # Gives the plugin access to the QGIS interface (iface)
         self.iface = iface
         self.n_slots = 10
-        self.config_path = Path(__file__).with_name('user_links.csv')
         self.inputs_group = 'RadioChannels'
+        self.config_path = Path(__file__).with_name('user_links.csv')
+        self.last_config_path_file = Path(__file__).with_name('.last_config_path')
+        self.restore_last_config_path()
 
         self.actions = []
         self.button_slots = {}
         self.link_config = self.load_link_config()
+
+    def restore_last_config_path(self):
+        try:
+            path = self.last_config_path_file.read_text(encoding='utf-8').strip()
+        except OSError:
+            return
+        if path and Path(path).is_file():
+            self.config_path = Path(path)
+
+    def remember_config_path(self):
+        try:
+            self.last_config_path_file.write_text(str(self.config_path.resolve()), encoding='utf-8')
+        except OSError:
+            pass
 
     def load_link_config(self):
         """
@@ -381,7 +380,7 @@ class RadioLayersPlugin:
                 slot_label = row[0].strip()
                 if slot_label.lower() == 'inputs_group':
                     if len(row) > 1 and row[1].strip():
-                        inputs_group = row[1].strip().strip("'\"")
+                        inputs_group = row[1].strip()
                     continue
                 if slot_label.lower() == 'slot':
                     continue
@@ -399,9 +398,9 @@ class RadioLayersPlugin:
                 if 0 <= slot < self.n_slots:
 
                     # Extract the slot attributes from the line
-                    shortname = row[1].strip().strip("'\"")
-                    layer_name = row[2].strip().strip("'\"")
-                    shortcut = row[3].strip().strip("'\"") if len(row) > 3 else ''
+                    shortname = row[1].strip()
+                    layer_name = row[2].strip()
+                    shortcut = row[3].strip() if len(row) > 3 else ''
 
                     # Write it in the container
                     slots[slot] = {'shortname': shortname, 'layer': layer_name, 'shortcut': shortcut}

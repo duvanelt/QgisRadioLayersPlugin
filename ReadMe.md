@@ -35,4 +35,5 @@ This plugin lets you display a selection of layers in a QGIS project as radio ch
 - Each file stores the input group and the ten slots' short names, layer names, and keyboard shortcuts.
 - To switch setups, click **Load config** and choose a previously saved CSV. The dashboard and toolbar buttons update immediately.
 - The dashboard's **Save** button writes changes to the currently selected configuration file. Before any file is loaded or saved under a new name, this is the plugin's default `user_links.csv` configuration.
-- The selected file is not linked to a QGIS project. Load the desired CSV when switching projects; after the plugin is reloaded, it starts empty again.
+- The plugin remembers the last selected CSV and loads it automatically the next time QGIS starts. Configurations remain ordinary CSV files, and you can load a different one at any time.
+- If the remembered CSV is no longer available, the plugin falls back to its bundled `user_links.csv` configuration.
